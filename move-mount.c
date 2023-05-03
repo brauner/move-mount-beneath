@@ -1,14 +1,15 @@
 #define _GNU_SOURCE
-#include <stdio.h>
-#include <sched.h>
-#include <stdlib.h>
-#include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <getopt.h>
+#include <sched.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/mount.h>
 #include <sys/prctl.h>
 #include <sys/wait.h>
-#include <sys/mount.h>
 #include <unistd.h>
 
 #ifndef __NR_open_tree
@@ -112,6 +113,10 @@ static inline int open_tree(int dfd, const char *filename, unsigned int flags)
 #define MOVE_MOUNT_BENEATH 0x00000200
 #endif
 
+#ifndef MOVE_MOUNT_SET_GROUP
+#define MOVE_MOUNT_SET_GROUP 0x00000100
+#endif
+
 #ifndef MOVE_MOUNT__MASK
 #define MOVE_MOUNT__MASK 0x00000077
 #endif
@@ -182,29 +187,54 @@ static inline int mount_setattr(int dfd, const char *path, unsigned int flags,
 		exit(EXIT_FAILURE);                                        \
 	} while (0)
 
+static struct option long_options[] = {
+	{ "beneath",     no_argument, 0,  'b' },
+	{ "detached",    no_argument, 0,  'd' },
+	{ "move",        no_argument, 0,  'm' },
+	{ "peer-group",  no_argument, 0,  'p' },
+	{ "tree",        no_argument, 0,  't' },
+	{ NULL,          0,           0,   0  }
+};
+
 int main(int argc, char *argv[])
 {
 	int mnt_fd, ret;
-	unsigned int flags_open_tree = OPEN_TREE_CLOEXEC | OPEN_TREE_CLONE;
+	bool moving = false;
+	unsigned int flags_open_tree = OPEN_TREE_CLOEXEC;
 	unsigned int flags_move_mount = 0;
-	int opt, new_argc;
+	int new_argc;
 	char **new_argv;
 	struct mount_attr attr = {
-		.propagation	= MS_SLAVE,
+		.propagation = 0,
 
 	};
 
-	while ((opt = getopt(argc, argv, "bmr")) != -1) {
+	for (;;) {
+		int index = 0;
+		int opt;
+
+		opt = getopt_long(argc, argv, "bdmpt", long_options, &index);
+		if (opt == -1)
+			break;
+
 		switch(opt) {
 		case 'b':
 			flags_move_mount |= MOVE_MOUNT_BENEATH;
-			fprintf(stderr, "Attaching mount beneath top mount\n");
+			fprintf(stderr, "Mounting beneath top mount\n");
+			break;
+		case 'd':
+			flags_open_tree |= OPEN_TREE_CLONE;
+			fprintf(stderr, "Creating anonymous mount\n");
 			break;
 		case 'm':
-			flags_open_tree &= ~OPEN_TREE_CLONE;
+			moving = true;
 			fprintf(stderr, "Moving mount\n");
 			break;
-		case 'r':
+		case 'p':
+			flags_move_mount |= MOVE_MOUNT_SET_GROUP;
+			fprintf(stderr, "Setting peer group\n");
+			break;
+		case 't':
 			flags_open_tree |= AT_RECURSIVE;
 			fprintf(stderr, "Using entire mount tree\n");
 			break;
@@ -219,6 +249,15 @@ int main(int argc, char *argv[])
 
 	if (new_argc != 2)
 		die_errno("Invalid number of arguments %d", new_argc);
+
+	if ((flags_move_mount & MOVE_MOUNT_SET_GROUP) &&
+	    ((flags_move_mount & MOVE_MOUNT_BENEATH) ||
+	     (flags_open_tree & OPEN_TREE_CLONE)))
+		die_errno("Setting sharing group can only be done exclusively");
+
+	if (!(flags_move_mount & MOVE_MOUNT_SET_GROUP) && !moving &&
+	    !(flags_open_tree & OPEN_TREE_CLONE))
+		die_errno("Please explicitly request either moving or detached mounts");
 
 	printf("Attaching mount %s -> %s\n", new_argv[0], new_argv[1]);
 	if (flags_open_tree & OPEN_TREE_CLONE)
