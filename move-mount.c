@@ -12,6 +12,66 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#ifndef __NR_fsmount
+	#if defined __alpha__
+		#define __NR_fsmount 542
+	#elif defined _MIPS_SIM
+		#if _MIPS_SIM == _MIPS_SIM_ABI32	/* o32 */
+			#define __NR_fsmount 4432
+		#endif
+		#if _MIPS_SIM == _MIPS_SIM_NABI32	/* n32 */
+			#define __NR_fsmount 6432
+		#endif
+		#if _MIPS_SIM == _MIPS_SIM_ABI64	/* n64 */
+			#define __NR_fsmount 5432
+		#endif
+	#elif defined __ia64__
+		#define __NR_fsmount (432 + 1024)
+	#else
+		#define __NR_fsmount 432
+	#endif
+#endif
+
+#ifndef __NR_fsconfig
+	#if defined __alpha__
+		#define __NR_fsconfig 541
+	#elif defined _MIPS_SIM
+		#if _MIPS_SIM == _MIPS_SIM_ABI32	/* o32 */
+			#define __NR_fsconfig 4431
+		#endif
+		#if _MIPS_SIM == _MIPS_SIM_NABI32	/* n32 */
+			#define __NR_fsconfig 6431
+		#endif
+		#if _MIPS_SIM == _MIPS_SIM_ABI64	/* n64 */
+			#define __NR_fsconfig 5431
+		#endif
+	#elif defined __ia64__
+		#define __NR_fsconfig (431 + 1024)
+	#else
+		#define __NR_fsconfig 431
+	#endif
+#endif
+
+#ifndef __NR_fsopen
+	#if defined __alpha__
+		#define __NR_fsopen 540
+	#elif defined _MIPS_SIM
+		#if _MIPS_SIM == _MIPS_SIM_ABI32	/* o32 */
+			#define __NR_fsopen 4430
+		#endif
+		#if _MIPS_SIM == _MIPS_SIM_NABI32	/* n32 */
+			#define __NR_fsopen 6430
+		#endif
+		#if _MIPS_SIM == _MIPS_SIM_ABI64	/* n64 */
+			#define __NR_fsopen 5430
+		#endif
+	#elif defined __ia64__
+		#define __NR_fsopen (430 + 1024)
+	#else
+		#define __NR_fsopen 430
+	#endif
+#endif
+
 #ifndef __NR_open_tree
 	#if defined __alpha__
 		#define __NR_open_tree			538
@@ -180,6 +240,62 @@ static inline int mount_setattr(int dfd, const char *path, unsigned int flags,
 	return syscall(__NR_mount_setattr, dfd, path, flags, attr, size);
 }
 
+#ifndef FSOPEN_CLOEXEC
+#define FSOPEN_CLOEXEC 0x00000001
+#endif
+
+static inline int fsopen(const char *fs_name, unsigned int flags)
+{
+	return syscall(__NR_fsopen, fs_name, flags);
+}
+
+#ifndef FSCONFIG_SET_FLAG
+#define FSCONFIG_SET_FLAG 0 /* Set parameter, supplying no value */
+#endif
+
+#ifndef FSCONFIG_SET_STRING
+#define FSCONFIG_SET_STRING 1 /* Set parameter, supplying a string value */
+#endif
+
+#ifndef FSCONFIG_SET_BINARY
+#define FSCONFIG_SET_BINARY 2 /* Set parameter, supplying a binary blob value */
+#endif
+
+#ifndef FSCONFIG_SET_PATH
+#define FSCONFIG_SET_PATH 3 /* Set parameter, supplying an object by path */
+#endif
+
+#ifndef FSCONFIG_SET_PATH_EMPTY
+#define FSCONFIG_SET_PATH_EMPTY 4 /* Set parameter, supplying an object by (empty) path */
+#endif
+
+#ifndef FSCONFIG_SET_FD
+#define FSCONFIG_SET_FD 5 /* Set parameter, supplying an object by fd */
+#endif
+
+#ifndef FSCONFIG_CMD_CREATE
+#define FSCONFIG_CMD_CREATE 6 /* Invoke superblock creation */
+#endif
+
+#ifndef FSCONFIG_CMD_RECONFIGURE
+#define FSCONFIG_CMD_RECONFIGURE 7 /* Invoke superblock reconfiguration */
+#endif
+
+static inline int fsconfig(int fd, unsigned int cmd, const char *key,
+			   const void *value, int aux)
+{
+	return syscall(__NR_fsconfig, fd, cmd, key, value, aux);
+}
+
+#ifndef FSMOUNT_CLOEXEC
+#define FSMOUNT_CLOEXEC 0x00000001
+#endif
+
+static inline int fsmount(int fs_fd, unsigned int flags, unsigned int attr_flags)
+{
+	return syscall(__NR_fsmount, fs_fd, flags, attr_flags);
+}
+
 #define die_errno(format, ...)                                             \
 	do {                                                               \
 		fprintf(stderr, "%m | %s: %d: %s: " format "\n", __FILE__, \
@@ -188,32 +304,61 @@ static inline int mount_setattr(int dfd, const char *path, unsigned int flags,
 	} while (0)
 
 static struct option long_options[] = {
-	{ "beneath",     no_argument, 0,  'b' },
-	{ "detached",    no_argument, 0,  'd' },
-	{ "move",        no_argument, 0,  'm' },
-	{ "peer-group",  no_argument, 0,  'p' },
-	{ "tree",        no_argument, 0,  't' },
-	{ NULL,          0,           0,   0  }
+	{ "filesystem",  required_argument,	0,  'f' },
+	{ "options",     required_argument,	0,  'o' },
+	{ "beneath",     no_argument,		0,  'b' },
+	{ "detached",    no_argument,		0,  'd' },
+	{ "move",        no_argument, 		0,  'm' },
+	{ "peer-group",  no_argument, 		0,  'p' },
+	{ "tree",        no_argument, 		0,  't' },
+	{ NULL,          0,           		0,   0  }
 };
+
+static size_t split_options(char *str)
+
+{
+	size_t ctr = 1;
+	char *s, *d;
+
+	if (!str)
+		return 0;
+
+	for (s = d = str;; s++, d++) {
+		if (*s == '\\') {
+			s++;
+		} else if (*s == ',') {
+			*d = '\0';
+			ctr++;
+			continue;
+		}
+		*d = *s;
+		if (!*s)
+			break;
+	}
+	return ctr;
+}
 
 int main(int argc, char *argv[])
 {
-	int mnt_fd, ret;
+	int mnt_fd, target_fd, ret;
 	bool moving = false;
 	unsigned int flags_open_tree = OPEN_TREE_CLOEXEC;
 	unsigned int flags_move_mount = 0;
 	int new_argc;
 	char **new_argv;
+	char *options = NULL;
+	const char *fstype = NULL;
 	struct mount_attr attr = {
 		.propagation = 0,
 
 	};
+	size_t len;
 
 	for (;;) {
 		int index = 0;
 		int opt;
 
-		opt = getopt_long(argc, argv, "bdmpt", long_options, &index);
+		opt = getopt_long(argc, argv, "bdmptf:o:", long_options, &index);
 		if (opt == -1)
 			break;
 
@@ -222,6 +367,10 @@ int main(int argc, char *argv[])
 			flags_move_mount |= MOVE_MOUNT_BENEATH;
 			fprintf(stderr, "Mounting beneath top mount\n");
 			break;
+		case 'f':
+			fstype = optarg;
+			fprintf(stderr, "Requesting filesystem type %s\n", fstype);
+			break;
 		case 'd':
 			flags_open_tree |= OPEN_TREE_CLONE;
 			fprintf(stderr, "Creating anonymous mount\n");
@@ -229,6 +378,12 @@ int main(int argc, char *argv[])
 		case 'm':
 			moving = true;
 			fprintf(stderr, "Moving mount\n");
+			break;
+		case 'o':
+			options = strdup(optarg);
+			if (!options)
+				die_errno("Failed to duplicate mount option string %s", optarg);
+			fprintf(stderr, "Mount options requested: %s\n", options);
 			break;
 		case 'p':
 			flags_move_mount |= MOVE_MOUNT_SET_GROUP;
@@ -240,40 +395,110 @@ int main(int argc, char *argv[])
 			break;
 		default: /* '?' */
 			errno = EINVAL;
-			die_errno("Unknown option");
+			printf("--beneath/-b	mounting beneath top mount\n"
+			       "--detached/-d	creating anonymous mount\n"
+			       "--filesystem/-f	filesytem type\n"
+			       "--move/-m	moving attached mount\n"
+			       "--options/-o	mount options\n"
+			       "--peer-group/-p	setting peer group\n"
+			       "--tree/-t	using entire mount tree\n");
+			exit(EXIT_FAILURE);
 		}
 	}
 
 	new_argv = &argv[optind];
 	new_argc = argc - optind;
 
-	if (new_argc != 2)
+	if (!fstype && new_argc != 2)
 		die_errno("Invalid number of arguments %d", new_argc);
+	if (fstype && new_argc != 1)
+		die_errno("Invalid number of arguments %d", new_argc);
+
+	if (options && !fstype)
+		die_errno("Using --options and without --fstype forbidden");
+
+	if (fstype && (flags_open_tree & (OPEN_TREE_CLONE | AT_RECURSIVE)))
+		die_errno("Using --fstype and --detached/--tree forbidden");
 
 	if ((flags_move_mount & MOVE_MOUNT_SET_GROUP) &&
 	    ((flags_move_mount & MOVE_MOUNT_BENEATH) ||
 	     (flags_open_tree & OPEN_TREE_CLONE)))
 		die_errno("Setting sharing group can only be done exclusively");
 
-	if (!(flags_move_mount & MOVE_MOUNT_SET_GROUP) && !moving &&
+	if (!fstype && !(flags_move_mount & MOVE_MOUNT_SET_GROUP) && !moving &&
 	    !(flags_open_tree & OPEN_TREE_CLONE))
 		die_errno("Please explicitly request either moving or detached mounts");
 
-	printf("Attaching mount %s -> %s\n", new_argv[0], new_argv[1]);
+	if (!fstype) {
+		printf("Attaching mount %s -> %s\n", new_argv[0], new_argv[1]);
+		target_fd = open(new_argv[1], O_PATH | O_NOFOLLOW);
+	} else {
+		printf("Attaching mount at %s\n", new_argv[0]);
+		target_fd = open(new_argv[0], O_PATH | O_NOFOLLOW);
+	}
+	if (target_fd < 0)
+		die_errno("openat");
+
 	if (flags_open_tree & OPEN_TREE_CLONE)
 		printf("Creating %s detached mount\n", (flags_open_tree & AT_RECURSIVE) ? "recursive" : "single");
 	else
 		printf("Moving %s attached mount\n", (flags_open_tree & AT_RECURSIVE) ? "recursive" : "single");
 
-	mnt_fd = open_tree(-EBADF, new_argv[0], flags_open_tree);
-	if (mnt_fd < 0)
-		die_errno("open_tree");
+	if (fstype) {
+		int fs_fd;
+		char *token;
+
+		fs_fd = fsopen(fstype, FSOPEN_CLOEXEC);
+		if (fs_fd < 0)
+			die_errno("fsopen");
+
+		len = split_options(options);
+		token = options;
+		for (size_t i = 0; i < len; i++) {
+			char *key, *val = NULL, *cut;
+
+			key = token;
+			cut = strchr(key, '=');
+			if (cut) {
+				*cut = '\0';
+				val = cut;
+				val++;
+				if (!*val)
+					die_errno("Invalid mount option format key without a value specified");
+			}
+
+			printf("Setting key(%s) with val(%s)\n", key, val ?: "(empty)");
+			if (val) {
+				ret = fsconfig(fs_fd, FSCONFIG_SET_STRING, key, val, 0);
+				*cut = '=';
+			} else {
+				ret = fsconfig(fs_fd, FSCONFIG_SET_FLAG, key, NULL, 0);
+			}
+			if (ret)
+				die_errno("fsconfig");
+			token = strchr(token, '\0') + 1;
+		}
+
+		ret = fsconfig(fs_fd, FSCONFIG_CMD_CREATE, NULL, NULL, 0);
+		if (ret)
+			die_errno("fsconfig");
+
+		mnt_fd = fsmount(fs_fd, FSMOUNT_CLOEXEC, 0);
+		if (mnt_fd < 0)
+			die_errno("fsmount");
+	} else {
+		mnt_fd = open_tree(-EBADF, new_argv[0], flags_open_tree);
+		if (mnt_fd < 0)
+			die_errno("open_tree");
+	}
 
 	if (mount_setattr(mnt_fd, "", AT_EMPTY_PATH | 0, &attr, sizeof(attr)))
 		die_errno("mount_setattr");
 
-	ret = move_mount(mnt_fd, "", -EBADF, new_argv[1],
-			 flags_move_mount | MOVE_MOUNT_F_EMPTY_PATH);
+	ret = move_mount(mnt_fd, "", target_fd, "",
+			 flags_move_mount |
+			 MOVE_MOUNT_F_EMPTY_PATH |
+			 MOVE_MOUNT_T_EMPTY_PATH);
 	if (ret < 0)
 		die_errno("move_mount");
 
