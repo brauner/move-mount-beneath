@@ -468,14 +468,14 @@ int main(int argc, char *argv[])
 			}
 
 			printf("Setting key(%s) with val(%s)\n", key, val ?: "(empty)");
-			if (val) {
+			if (val)
 				ret = fsconfig(fs_fd, FSCONFIG_SET_STRING, key, val, 0);
-				*cut = '=';
-			} else {
+			else
 				ret = fsconfig(fs_fd, FSCONFIG_SET_FLAG, key, NULL, 0);
-			}
 			if (ret)
 				die_errno("fsconfig");
+			if (cut)
+				*cut = '=';
 			token = strchr(token, '\0') + 1;
 		}
 
