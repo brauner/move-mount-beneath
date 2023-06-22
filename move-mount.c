@@ -310,6 +310,7 @@ static struct option long_options[] = {
 	{ "detached",    no_argument,		0,  'd' },
 	{ "move",        no_argument, 		0,  'm' },
 	{ "peer-group",  no_argument, 		0,  'p' },
+	{ "read-only",  no_argument, 		0,  'r' },
 	{ "tree",        no_argument, 		0,  't' },
 	{ NULL,          0,           		0,   0  }
 };
@@ -343,7 +344,7 @@ int main(int argc, char *argv[])
 	int mnt_fd, target_fd, ret;
 	bool moving = false;
 	unsigned int flags_open_tree = OPEN_TREE_CLOEXEC;
-	unsigned int flags_move_mount = 0;
+	unsigned int flags_move_mount = 0, flags_attr;
 	int new_argc;
 	char **new_argv;
 	char *options = NULL;
@@ -388,6 +389,10 @@ int main(int argc, char *argv[])
 		case 'p':
 			flags_move_mount |= MOVE_MOUNT_SET_GROUP;
 			fprintf(stderr, "Setting peer group\n");
+			break;
+		case 'r':
+			flags_attr |= MOUNT_ATTR_RDONLY;
+			fprintf(stderr, "Creating read-only mount\n");
 			break;
 		case 't':
 			flags_open_tree |= AT_RECURSIVE;
@@ -458,6 +463,7 @@ int main(int argc, char *argv[])
 			char *key, *val = NULL, *cut;
 
 			key = token;
+			key += strspn(key, " \t");
 			cut = strchr(key, '=');
 			if (cut) {
 				*cut = '\0';
@@ -483,7 +489,7 @@ int main(int argc, char *argv[])
 		if (ret)
 			die_errno("fsconfig");
 
-		mnt_fd = fsmount(fs_fd, FSMOUNT_CLOEXEC, 0);
+		mnt_fd = fsmount(fs_fd, FSMOUNT_CLOEXEC, flags_attr);
 		if (mnt_fd < 0)
 			die_errno("fsmount");
 	} else {
@@ -492,6 +498,8 @@ int main(int argc, char *argv[])
 			die_errno("open_tree");
 	}
 
+	if (!fstype)
+		attr.attr_set |= flags_attr;
 	if (mount_setattr(mnt_fd, "", AT_EMPTY_PATH | 0, &attr, sizeof(attr)))
 		die_errno("mount_setattr");
 
