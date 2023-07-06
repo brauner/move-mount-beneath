@@ -307,10 +307,11 @@ static struct option long_options[] = {
 	{ "filesystem",  required_argument,	0,  'f' },
 	{ "options",     required_argument,	0,  'o' },
 	{ "beneath",     no_argument,		0,  'b' },
+	{ "delegate",    optional_argument,	0,  'q' },
 	{ "detached",    no_argument,		0,  'd' },
 	{ "move",        no_argument, 		0,  'm' },
 	{ "peer-group",  no_argument, 		0,  'p' },
-	{ "read-only",  no_argument, 		0,  'r' },
+	{ "read-only",   no_argument, 		0,  'r' },
 	{ "tree",        no_argument, 		0,  't' },
 	{ NULL,          0,           		0,   0  }
 };
@@ -401,6 +402,7 @@ int main(int argc, char *argv[])
 		default: /* '?' */
 			errno = EINVAL;
 			printf("--beneath/-b	mounting beneath top mount\n"
+			       "--delegate/-q	delegate superblock to user namespace\n"
 			       "--detached/-d	creating anonymous mount\n"
 			       "--filesystem/-f	filesytem type\n"
 			       "--move/-m	moving attached mount\n"
@@ -473,11 +475,22 @@ int main(int argc, char *argv[])
 					die_errno("Invalid mount option format key without a value specified");
 			}
 
-			printf("Setting key(%s) with val(%s)\n", key, val ?: "(empty)");
-			if (val)
-				ret = fsconfig(fs_fd, FSCONFIG_SET_STRING, key, val, 0);
-			else
-				ret = fsconfig(fs_fd, FSCONFIG_SET_FLAG, key, NULL, 0);
+			if (strcmp(key, "delegate") == 0 && val) {
+				int fd_userns;
+
+				fd_userns = open(val, O_RDONLY | O_CLOEXEC | O_NOCTTY);
+				if (fd_userns < 0)
+					die_errno("Failed to open user namespace %s", val);
+
+				printf("Delegating filesystems %s to user namespace %d\n", fstype, fd_userns);
+				ret = fsconfig(fs_fd, FSCONFIG_SET_FD, "delegate", NULL, fd_userns);
+			} else {
+				printf("Setting key(%s) with val(%s)\n", key, val ?: "(empty)");
+				if (val)
+					ret = fsconfig(fs_fd, FSCONFIG_SET_STRING, key, val, 0);
+				else
+					ret = fsconfig(fs_fd, FSCONFIG_SET_FLAG, key, NULL, 0);
+			}
 			if (ret)
 				die_errno("fsconfig");
 			if (cut)
