@@ -289,7 +289,16 @@ static inline int do_fsopen(const char *fs_name, unsigned int flags)
 static inline int do_fsconfig(int fd, unsigned int cmd, const char *key,
 			      const void *value, int aux)
 {
-	return syscall(__NR_fsconfig, fd, cmd, key, value, aux);
+	char buf[4096];
+	int ret;
+	ret = syscall(__NR_fsconfig, fd, cmd, key, value, aux);
+	if (ret < 0) {
+		ret = read(fd, buf, sizeof(buf));
+		if (ret <= 0)
+			strcpy(buf, "EMPTY");
+		fprintf(stderr, "%m | %s: %d: %s: %s\n",
+			__FILE__, __LINE__, __func__, buf);
+	}
 }
 
 #ifndef FSMOUNT_CLOEXEC
