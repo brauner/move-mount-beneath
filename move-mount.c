@@ -140,7 +140,7 @@
 #define OPEN_TREE_CLOEXEC O_CLOEXEC /* Close the file on execve() */
 #endif
 
-static inline int open_tree(int dfd, const char *filename, unsigned int flags)
+static inline int do_open_tree(int dfd, const char *filename, unsigned int flags)
 {
 	return syscall(__NR_open_tree, dfd, filename, flags);
 }
@@ -181,8 +181,9 @@ static inline int open_tree(int dfd, const char *filename, unsigned int flags)
 #define MOVE_MOUNT__MASK 0x00000077
 #endif
 
-static inline int move_mount(int from_dfd, const char *from_pathname, int to_dfd,
-			     const char *to_pathname, unsigned int flags)
+static inline int do_move_mount(int from_dfd, const char *from_pathname,
+				int to_dfd, const char *to_pathname,
+				unsigned int flags)
 {
 	return syscall(__NR_move_mount, from_dfd, from_pathname, to_dfd, to_pathname, flags);
 }
@@ -227,15 +228,15 @@ static inline int move_mount(int from_dfd, const char *from_pathname, int to_dfd
 #define MOUNT_ATTR_IDMAP 0x00100000
 #endif
 
-struct mount_attr {
+struct mount_attr_local {
 	__u64 attr_set;
 	__u64 attr_clr;
 	__u64 propagation;
 	__u64 userns_fd;
 };
 
-static inline int mount_setattr(int dfd, const char *path, unsigned int flags,
-				struct mount_attr *attr, size_t size)
+static inline int do_mount_setattr(int dfd, const char *path, unsigned int flags,
+				   struct mount_attr_local *attr, size_t size)
 {
 	return syscall(__NR_mount_setattr, dfd, path, flags, attr, size);
 }
@@ -244,7 +245,7 @@ static inline int mount_setattr(int dfd, const char *path, unsigned int flags,
 #define FSOPEN_CLOEXEC 0x00000001
 #endif
 
-static inline int fsopen(const char *fs_name, unsigned int flags)
+static inline int do_fsopen(const char *fs_name, unsigned int flags)
 {
 	return syscall(__NR_fsopen, fs_name, flags);
 }
@@ -281,8 +282,12 @@ static inline int fsopen(const char *fs_name, unsigned int flags)
 #define FSCONFIG_CMD_RECONFIGURE 7 /* Invoke superblock reconfiguration */
 #endif
 
-static inline int fsconfig(int fd, unsigned int cmd, const char *key,
-			   const void *value, int aux)
+#ifndef FSCONFIG_CMD_CREATE_EXCL
+#define FSCONFIG_CMD_CREATE_EXCL 8 /* Invoke exclusive superblock creation */
+#endif
+
+static inline int do_fsconfig(int fd, unsigned int cmd, const char *key,
+			      const void *value, int aux)
 {
 	return syscall(__NR_fsconfig, fd, cmd, key, value, aux);
 }
@@ -291,7 +296,8 @@ static inline int fsconfig(int fd, unsigned int cmd, const char *key,
 #define FSMOUNT_CLOEXEC 0x00000001
 #endif
 
-static inline int fsmount(int fs_fd, unsigned int flags, unsigned int attr_flags)
+static inline int do_fsmount(int fs_fd, unsigned int flags,
+			     unsigned int attr_flags)
 {
 	return syscall(__NR_fsmount, fs_fd, flags, attr_flags);
 }
@@ -309,6 +315,7 @@ static struct option long_options[] = {
 	{ "beneath",     no_argument,		0,  'b' },
 	{ "delegate",    optional_argument,	0,  'q' },
 	{ "detached",    no_argument,		0,  'd' },
+	{ "exclusive",   no_argument,		0,  'e' },
 	{ "move",        no_argument, 		0,  'm' },
 	{ "peer-group",  no_argument, 		0,  'p' },
 	{ "read-only",   no_argument, 		0,  'r' },
@@ -343,14 +350,14 @@ static size_t split_options(char *str)
 int main(int argc, char *argv[])
 {
 	int mnt_fd, target_fd, ret;
-	bool moving = false;
+	bool exclusive = false, moving = false;
 	unsigned int flags_open_tree = OPEN_TREE_CLOEXEC;
 	unsigned int flags_move_mount = 0, flags_attr;
 	int new_argc;
 	char **new_argv;
 	char *options = NULL;
 	const char *fstype = NULL;
-	struct mount_attr attr = {
+	struct mount_attr_local attr = {
 		.propagation = 0,
 
 	};
@@ -360,7 +367,7 @@ int main(int argc, char *argv[])
 		int index = 0;
 		int opt;
 
-		opt = getopt_long(argc, argv, "bdmptf:o:", long_options, &index);
+		opt = getopt_long(argc, argv, "bdemptf:o:", long_options, &index);
 		if (opt == -1)
 			break;
 
@@ -376,6 +383,10 @@ int main(int argc, char *argv[])
 		case 'd':
 			flags_open_tree |= OPEN_TREE_CLONE;
 			fprintf(stderr, "Creating anonymous mount\n");
+			break;
+		case 'e':
+			exclusive = true;
+			fprintf(stderr, "Request exclusive superblock creation\n");
 			break;
 		case 'm':
 			moving = true;
@@ -404,6 +415,7 @@ int main(int argc, char *argv[])
 			printf("--beneath/-b	mounting beneath top mount\n"
 			       "--delegate/-q	delegate superblock to user namespace\n"
 			       "--detached/-d	creating anonymous mount\n"
+			       "--exclusive/-e	fail if matching superblock already exists\n"
 			       "--filesystem/-f	filesytem type\n"
 			       "--move/-m	moving attached mount\n"
 			       "--options/-o	mount options\n"
@@ -423,6 +435,9 @@ int main(int argc, char *argv[])
 
 	if (options && !fstype)
 		die_errno("Using --options and without --fstype forbidden");
+
+	if (exclusive && !fstype)
+		die_errno("Using --exclusive and without --fstype forbidden");
 
 	if (fstype && (flags_open_tree & (OPEN_TREE_CLONE | AT_RECURSIVE)))
 		die_errno("Using --fstype and --detached/--tree forbidden");
@@ -455,7 +470,7 @@ int main(int argc, char *argv[])
 		int fs_fd;
 		char *token;
 
-		fs_fd = fsopen(fstype, FSOPEN_CLOEXEC);
+		fs_fd = do_fsopen(fstype, FSOPEN_CLOEXEC);
 		if (fs_fd < 0)
 			die_errno("fsopen");
 
@@ -482,14 +497,14 @@ int main(int argc, char *argv[])
 				if (fd_userns < 0)
 					die_errno("Failed to open user namespace %s", val);
 
-				printf("Delegating filesystems %s to user namespace %d\n", fstype, fd_userns);
-				ret = fsconfig(fs_fd, FSCONFIG_SET_FD, "delegate", NULL, fd_userns);
+				printf("EXPERIMENTAL: Delegating filesystems %s to user namespace %d\n", fstype, fd_userns);
+				ret = do_fsconfig(fs_fd, FSCONFIG_SET_FD, "delegate", NULL, fd_userns);
 			} else {
 				printf("Setting key(%s) with val(%s)\n", key, val ?: "(empty)");
 				if (val)
-					ret = fsconfig(fs_fd, FSCONFIG_SET_STRING, key, val, 0);
+					ret = do_fsconfig(fs_fd, FSCONFIG_SET_STRING, key, val, 0);
 				else
-					ret = fsconfig(fs_fd, FSCONFIG_SET_FLAG, key, NULL, 0);
+					ret = do_fsconfig(fs_fd, FSCONFIG_SET_FLAG, key, NULL, 0);
 			}
 			if (ret)
 				die_errno("fsconfig");
@@ -498,28 +513,31 @@ int main(int argc, char *argv[])
 			token = strchr(token, '\0') + 1;
 		}
 
-		ret = fsconfig(fs_fd, FSCONFIG_CMD_CREATE, NULL, NULL, 0);
+		if (exclusive)
+			ret = do_fsconfig(fs_fd, FSCONFIG_CMD_CREATE_EXCL, NULL, NULL, 0);
+		else
+			ret = do_fsconfig(fs_fd, FSCONFIG_CMD_CREATE, NULL, NULL, 0);
 		if (ret)
-			die_errno("fsconfig");
+			die_errno("%sfsconfig", exclusive ? "EXPERIMENTAL exclusive: " : "");
 
-		mnt_fd = fsmount(fs_fd, FSMOUNT_CLOEXEC, flags_attr);
+		mnt_fd = do_fsmount(fs_fd, FSMOUNT_CLOEXEC, flags_attr);
 		if (mnt_fd < 0)
 			die_errno("fsmount");
 	} else {
-		mnt_fd = open_tree(-EBADF, new_argv[0], flags_open_tree);
+		mnt_fd = do_open_tree(-EBADF, new_argv[0], flags_open_tree);
 		if (mnt_fd < 0)
 			die_errno("open_tree");
 	}
 
 	if (!fstype)
 		attr.attr_set |= flags_attr;
-	if (mount_setattr(mnt_fd, "", AT_EMPTY_PATH | 0, &attr, sizeof(attr)))
+	if (do_mount_setattr(mnt_fd, "", AT_EMPTY_PATH | 0, &attr, sizeof(attr)))
 		die_errno("mount_setattr");
 
-	ret = move_mount(mnt_fd, "", target_fd, "",
-			 flags_move_mount |
-			 MOVE_MOUNT_F_EMPTY_PATH |
-			 MOVE_MOUNT_T_EMPTY_PATH);
+	ret = do_move_mount(mnt_fd, "", target_fd, "",
+			    flags_move_mount |
+			    MOVE_MOUNT_F_EMPTY_PATH |
+			    MOVE_MOUNT_T_EMPTY_PATH);
 	if (ret < 0)
 		die_errno("move_mount");
 
