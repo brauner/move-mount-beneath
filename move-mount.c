@@ -363,7 +363,7 @@ int main(int argc, char *argv[])
 	int mnt_fd, target_fd, ret;
 	bool exclusive = false, moving = false;
 	unsigned int flags_open_tree = OPEN_TREE_CLOEXEC;
-	unsigned int flags_move_mount = 0, flags_attr;
+	unsigned int flags_move_mount = 0, flags_attr = 0;
 	int new_argc;
 	char **new_argv;
 	char *options = NULL;
