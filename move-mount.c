@@ -13,6 +13,11 @@
 #include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <stdint.h>
+
+#ifndef __u64
+	#define __u64 uint64_t
+#endif
 
 #ifndef __NR_fsmount
 	#if defined __alpha__
