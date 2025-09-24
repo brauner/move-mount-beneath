@@ -12,6 +12,7 @@
 #include <sys/mount.h>
 #include <sys/prctl.h>
 #include <sys/wait.h>
+#include <linux/types.h>
 #include <unistd.h>
 
 #ifndef __NR_fsmount
